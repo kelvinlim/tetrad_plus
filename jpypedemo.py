@@ -6,7 +6,8 @@ import jpype
 import jpype.imports
 
 # REPLACE WITH YOUR PATH TO JAR
-jpype.startJVM("-Xmx4g", classpath="jars/tetrad-current.jar")
+classpath="jars/tetrad-gui-7.6.3-launch.jar"
+jpype.startJVM("-Xmx4g", classpath=classpath)
 
 import java.util as util
 import edu.cmu.tetrad.data as td
@@ -55,9 +56,13 @@ for fname in ['boston_data_raw.csv']:
     # MAKE TIERED KNOWLEDGE BASED ON LAGS
     knowledge = td.Knowledge()
     for col in df.columns:
-        if col[-4:] == "_lag": knowledge.addToTier(0, col)
-        else:knowledge.addToTier(1, col)
-    knowledge.setTierForbiddenWithin(0, True)
+        # new lag variable
+        lag_var = col + "_lag"
+        # add lag variable to the knowledge base
+        knowledge.addToTier(0, lag_var)
+        # add the original variable to the knowledge base
+        knowledge.addToTier(0, col)
+    #knowledge.setTierForbiddenWithin(0, True)
 
     score = ts.score.SemBicScore(data, True)
     score.setPenaltyDiscount(penalty_discount)
@@ -78,3 +83,4 @@ for fname in ['boston_data_raw.csv']:
     # SAVE THE OUTPUT GRAPHS
     graph = search.search().toString()
     with open(f"graphs/{fname}", "w") as f: f.write(str(graph))
+    pass
