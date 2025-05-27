@@ -7,7 +7,7 @@ import jpype.imports
 
 # REPLACE WITH YOUR PATH TO JAR
 classpath="jars/tetrad-gui-7.6.3-launch.jar"
-jpype.startJVM("-Xmx4g", classpath=classpath)
+res = jpype.startJVM("-Xmx8g", classpath=classpath)
 
 import java.util as util
 import edu.cmu.tetrad.data as td

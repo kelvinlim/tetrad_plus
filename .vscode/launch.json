@@ -15,6 +15,17 @@
                 "--cmd",
                 "test"
             ]
+        },        
+        {
+            "name": "tetrad_plus",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/tetrad_plus.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--cmd",
+                "test"
+            ]
         }
     ]
 }
