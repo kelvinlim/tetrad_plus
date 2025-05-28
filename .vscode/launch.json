@@ -22,6 +22,7 @@
             "request": "launch",
             "program": "src/tetrad_plus.py",
             "console": "integratedTerminal",
+            "justMyCode": false,
             "args": [
                 "--cmd",
                 "test"

@@ -1,0 +1,755 @@
+#! /usr/bin/env python
+
+import json
+import os
+import re
+from pathlib import Path
+import socket
+from typing import Optional, List
+
+import jpype
+import jpype.imports
+
+from dotenv import load_dotenv
+import numpy as np
+import pandas as pd
+import semopy
+
+from dgraph_flex import DgraphFlex
+
+from sklearn.preprocessing import StandardScaler
+
+__version_info__ = ('0', '1', '0')
+__version__ = '.'.join(__version_info__)
+
+version_history = \
+"""
+0.1.0 - initial version  
+"""
+class TetradPlus():
+    
+    def __init__(self):
+        res = self.loadPaths()
+        self.startJVM()
+        pass
+    
+    def startJVM(self, 
+                 classpath="jars/tetrad-gui-7.6.3-launch.jar",
+                 jvm_args="-Xmx8g"
+                 ):
+        
+        """
+        Start the JVM using the provided args
+        
+        Args:
+        
+        """
+        res = jpype.startJVM(jvm_args, classpath=classpath)     
+        
+        # make the classes available within the class
+        self.util = jpype.JPackage("java.util")
+        self.td = jpype.JPackage("edu.cmu.tetrad.data")
+        self.tg = jpype.JPackage("edu.cmu.tetrad.graph")
+        self.ts = jpype.JPackage("edu.cmu.tetrad.search")
+        self.knowledge = self.td.Knowledge()
+        
+        self.lang = jpype.JPackage("java.lang")
+
+
+        
+
+
+    
+    def loadPaths(self):
+        """
+        Load the paths from ~/.tetradrc
+        
+        JAVA_HOME - location of JDK, e.g. /Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home
+        GRAPHVIZ_BIN - location of graphviz binary, 
+                        e.g. /opt/homebrew/bin
+        """
+        
+        tetradrc_file = ".tetradrc"
+        # set the PATH for java and graphviz
+        hostname = socket.gethostname() 
+        home_directory = Path.home()
+        # check if .javarc file exists in home directory
+        javaenv_path = os.path.join(home_directory, tetradrc_file)
+        if os.path.exists(javaenv_path):
+            # load the file
+            load_dotenv(dotenv_path=javaenv_path)
+            java_home = os.environ.get("JAVA_HOME")
+            java_path = f"{java_home}/bin"
+            current_path = os.environ.get('PATH')
+            # add this to PATH
+            os.environ['PATH'] = f"{current_path}{os.pathsep}{java_path}"
+
+            # add to path
+            graphviz_bin = os.environ.get("GRAPHVIZ_BIN")
+            os.environ['PATH'] = f"{current_path}{os.pathsep}{graphviz_bin}"
+            return True
+        else:
+            print(f"Unable to load configuration file {tetradrc_file} from your home directory.")
+            print("This file should contain two environment variables:")
+            print("JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home")
+            print("GRAPHVIZ_BIN=/opt/homebrew/bin")
+            raise ValueError(f"{tetradrc_file} not found.")
+        
+        return False
+        
+        
+    def df_to_data(self, df: pd.DataFrame):
+        """
+        
+        Load pandas dataframe into TetradSearch
+
+        Args:
+            df (pd.DataFrame): 
+
+        Returns:
+            
+        """
+        cols = df.columns
+        values = df.values
+        n, p = df.shape
+
+        # JITTER THE DATA; FEEL FREE TO REMOVE
+        values += 1e-3 * np.random.randn(n, p)
+
+        variables = self.util.ArrayList()
+        for col in cols:
+            variables.add(self.td.ContinuousVariable(str(col)))
+
+        databox = self.td.DoubleDataBox(n, p)
+        for col, var in enumerate(values.T):
+            for row, val in enumerate(var):
+                databox.set(row, col, val)
+
+        return self.td.BoxDataSet(databox, variables)
+
+    def read_csv(self, file_path: str) -> pd.DataFrame:
+        """Read a CSV file and return a pandas DataFrame.
+        Args:
+            file_path (str): Path to the CSV file.
+
+        Returns:
+            pd.DataFrame: pandas DataFrame
+        """
+        self.full_df = pd.read_csv(file_path)
+        return self.full_df
+
+    def add_lag_columns(self, df: pd.DataFrame, lag_stub='_') -> pd.DataFrame:
+        """
+        Lag the dataframe by shifting the columns by one row
+
+        Args:
+            df (pd.DataFrame): the dataframe to lag
+            lag_stub (str): the string to append to the column names for the lagged variables
+
+        Returns:
+            pd.DataFrame: the lagged dataframe
+        """
+        
+        # create a copy of the dataframe
+        df_lag = df.copy()
+        
+        # create additional columns for the lagged variables, naming them  lagdrinks, lagsad, etc.
+        cols_to_lag = df.columns.tolist()
+        # shift by one row
+        for col in cols_to_lag:
+            df_lag[f'{col}{lag_stub}'] = df[col].shift(1)
+        
+        # drop the first row
+        df_lag = df_lag.dropna()
+        
+        # reset index
+        df_lag = df_lag.reset_index(drop=True)
+        
+        return df_lag
+
+   
+    def load_df_into_ts(self,df):
+        """
+        Loads a pandas DataFrame into the TetradSearch object.
+        """
+        self.data = tr.pandas_data_to_tetrad(df)
+        return self.data
+    
+    def subsample_df(self, df: Optional[pd.DataFrame] = None,    
+                    fraction: float = 0.9,
+                    random_state: Optional[int] = None) -> pd.DataFrame:
+        """
+        Randomly subsample the DataFrame to a fraction of rows
+        Args:
+            df - pandas DataFrame
+            fraction - proportion of rows to keep, default 0.9
+            random_state - random state for reproducibility
+        Returns:
+            df - pandas DataFrame
+        """
+        if df is None:
+            if hasattr(self, 'full_df') and self.full_df is not None:
+                df = self.full_df
+            else:
+                raise ValueError("DataFrame must be provided.")
+        if fraction <= 0 or fraction > 1:
+            raise ValueError(f"fraction must be between 0 and 1")
+        
+        # Use the DataFrame's built-in sample method with the specified fraction
+        # The `random_state` parameter ensures reproducibility if an integer is provided
+        scrambled_df = df.sample(frac=fraction, random_state=random_state)
+
+        # Step 2: Sort the sampled DataFrame by its original index
+        # This restores the original relative order of the kept rows
+        self.subsampled_df = scrambled_df.sort_index()
+        
+        return self.subsampled_df
+
+    def standardize_df_cols(self, df, diag=False):
+        """
+        standardize the columns in the dataframe
+        https://machinelearningmastery.com/normalize-standardize-machine-learning-data-weka/
+        
+        * get the column names for the dataframe
+        * convert the dataframe into  a numeric array
+        * scale the data
+        * convert array back to a df
+        * add back the column names
+        * set to the previous df
+        """
+        
+        # describe original data - first two columns
+        if diag:
+            print(df.iloc[:,0:2].describe())
+        # get column names
+        colnames = df.columns
+        # convert dataframe to array
+        data = df.values
+        # standardize the data
+        std_data = StandardScaler().fit_transform(data)
+        # convert array back to df, use original colnames
+        newdf = pd.DataFrame(std_data, columns = colnames)
+        # describe new data - first two columns
+        if diag:
+            print(newdf.iloc[:,0:2].describe())
+        
+        return newdf
+    
+    def create_permuted_dfs(self, df: pd.DataFrame, n_permutations: int, seed: int = None) -> List[pd.DataFrame]:
+        """
+        Generates multiple DataFrames, each with elements permutated within columns independently.
+
+        Args:
+            df: The input pandas DataFrame.
+            n_permutations: The number of permutated DataFrames to generate.
+            seed: An optional integer seed for the random number generator
+                to ensure reproducibility of the sequence of permutations.
+                If None, the permutations will be different each time.
+
+        Returns:
+            A list containing n pandas DataFrames, each being a column-wise
+            permutation of the original DataFrame.
+        """
+        # Check if the input DataFrame is empty
+        if df.empty:
+            raise ValueError("Input DataFrame is empty. Please provide a valid DataFrame.")
+
+        # Check if n is a positive integer
+        if not isinstance(n_permutations, int) or n_permutations <= 0:
+            raise ValueError("The number of permutations (n) must be a positive integer.")
+
+        # If a seed is provided, set it for reproducibility
+        # This allows for consistent random permutations across different runs
+        # If no seed is provided, the permutations will be different each time
+        # Note: np.random.default_rng() is used to create a new random number generator instance
+        # This is a more modern approach compared to np.random.seed() and allows for better control
+        # over random number generation.
+        # The seed is used to initialize the random number generator
+        # This ensures that the same sequence of random numbers is generated each time
+        # the same seed is used.
+        # This is useful for debugging and testing purposes
+        # If no seed is provided, the permutations will be different each time
+        # the function is called.   
+        # Initialize the random number generator once
+        # If a seed is provided, the sequence of generated permutations will be reproducible
+        rng = np.random.default_rng(seed)
+
+        permutated_dfs = [] # List to store the resulting DataFrames
+
+        for _ in range(n_permutations): # Generate n permutations
+            # Create a fresh copy of the original DataFrame for each permutation
+            df_permuted = df.copy()
+
+            # Permutate each column independently using the same RNG state
+            for col in df_permuted.columns:
+                df_permuted[col] = rng.permutation(df_permuted[col].values)
+
+            # Add the newly permutated DataFrame to the list
+            permutated_dfs.append(df_permuted)
+
+        return permutated_dfs
+
+    
+    def select_edges(self, edge_counts: dict, min_fraction: float) -> dict:
+        """
+        Select edges based on a fraction of the total edges
+        Args:
+            edges - dictionary with the edges and their counts
+            min_fraction - mininum fraction of edges to select
+        Returns:
+            dict - dict of selected edges as keys and their fraction as values
+        """
+
+        selected_edges = {}  # holds the selected edges as strings e.g. 'A --> B' with fraction
+        
+        # create a dataframe with src, edge, dest and fraction, extract the src, edge, dest from each edge
+        # and add to the dataframe
+        edge_df = pd.DataFrame(edge_counts.items(), columns=['edge', 'fraction'])
+        edge_df[['src', 'edge_type', 'dest']] = edge_df['edge'].str.split(' ', expand=True)
+        # drop the edge column
+        edge_df = edge_df.drop(columns=['edge'])
+        
+        # first lets process the edge_type of --> and o->
+        # filter the df for edge_type of --> and o->
+        directed_edge_df = edge_df[edge_df['edge_type'].isin(['-->', 'o->'])]
+        # sort the directed edges by src, dest, and fraction (descending)
+        directed_edge_df = directed_edge_df.sort_values(by=['src', 'dest', 'fraction'], ascending=[True, True, False])
+
+        # get the rows where the src and dest only appear once in the df
+        single_directed_edges = directed_edge_df.groupby(['src', 'dest']).filter(lambda x: len(x) == 1)
+        
+        # iterate over the rows and add them to the edge list if the fraction is >= min_fraction
+        for index, row in single_directed_edges.iterrows():
+            if row['fraction'] >= min_fraction:
+                # create the edge string
+                edge_str = f"{row['src']} {row['edge_type']} {row['dest']}"
+                # add to the dictionary
+                selected_edges[edge_str] = row['fraction']
+                pass
+            
+        # now lets process the directed edges that have multiple rows                   
+        # keep the rows where the src and dest are the same across rows
+        multiple_directed_edges = directed_edge_df.groupby(['src', 'dest']).filter(lambda x: len(x) > 1)
+        
+        # iterate over two rows, and if the sum of fraction is greater than min_fraction then keep the edge
+        for i in range(0, len(multiple_directed_edges), 2):
+            row_pairs = multiple_directed_edges.iloc[i:i+2]
+            # get the sum of the fraction
+            fraction_sum = row_pairs['fraction'].sum()
+            # check if the sum is greater than min_fraction
+            if fraction_sum >= min_fraction:
+                # create the edge string
+                # we use the first row to create the edge string since it has the highest fraction
+                edge_str = f"{row_pairs.iloc[0]['src']} {row_pairs.iloc[0]['edge_type']} {row_pairs.iloc[0]['dest']}"
+                # add to the dictionary
+                selected_edges[edge_str] = float(fraction_sum)
+                pass
+            pass
+        
+        # get the undirected edges
+        undirected_edges_df = edge_df[~edge_df['edge_type'].isin(['-->', 'o->'])]
+
+        # iterate over the df using iloc, if the src > dest then swap them in the row and update the df
+        # this will make sure that the edges are in the same order
+        # for example, A o-o B and B <-> A will be made adjacent to each other when sorted
+        for i in undirected_edges_df.index:
+            # Use .loc to access the specific row and columns directly
+            # This ensures you are working with the original DataFrame
+            # and prevents the SettingWithCopyWarning
+            if undirected_edges_df.loc[i, 'src'] > undirected_edges_df.loc[i, 'dest']:
+                # Swap the values directly in the DataFrame using .loc
+                # We use tuple assignment for a clean swap
+                undirected_edges_df.loc[i, 'src'], undirected_edges_df.loc[i, 'dest'] = \
+                undirected_edges_df.loc[i, 'dest'], undirected_edges_df.loc[i, 'src']
+            
+            
+            # row = undirected_edges_df.iloc[i]
+            # if row['src'] > row['dest']:
+            #     # swap the src and dest
+            #     temp = row['src']
+            #     row['src'] = row['dest']
+            #     row['dest'] = temp
+            #     # update the row in the df using iloc
+            #     undirected_edges_df.iloc[i] = row
+            pass
+    
+        # sort the undirected edges by src, dest, and fraction (descending)
+        undirected_edges_df = undirected_edges_df.sort_values(by=['src', 'dest', 'fraction'], ascending=[True, True, False])
+        # get the undirected edges that have single rows
+        single_undirected_edge_df = undirected_edges_df.groupby(['src', 'dest']).filter(lambda x: len(x) == 1)
+        
+        # iterate over the rows and add them to the edge dict if the fraction is >= min_fraction
+        for index, row in single_undirected_edge_df.iterrows():
+            if row['fraction'] >= min_fraction:
+                # create the edge string
+                edge_str = f"{row['src']} {row['edge_type']} {row['dest']}"
+                # add to the dictionary
+                selected_edges[edge_str] = row['fraction']
+                pass
+
+        # now lets process the undirected edges that have multiple rows
+        multiple_undirected_edges_df = undirected_edges_df.groupby(['src', 'dest']).filter(lambda x: len(x) > 1)
+        # iterate over two rows, and if the sum of fraction is greater than min_fraction then keep the edge
+        for i in range(0, len(multiple_undirected_edges_df), 2):
+            row_pairs = multiple_undirected_edges_df.iloc[i:i+2]
+            # get the sum of the fraction
+            fraction_sum = row_pairs['fraction'].sum()
+            # check if the sum is greater than min_fraction
+            if fraction_sum >= min_fraction:
+                # create the edge string
+                # we use the first row to create the edge string since it has the highest fraction
+                edge_str = f"{row_pairs.iloc[0]['src']} {row_pairs.iloc[0]['edge_type']} {row_pairs.iloc[0]['dest']}"
+                # add to the dictionary
+                selected_edges[edge_str] = float(fraction_sum)
+                pass
+            pass
+
+        return list(selected_edges.keys())
+
+    def read_prior_file(self, prior_file) -> list:
+        """
+        Read a prior file and return the contents as a list of strings
+        Args:
+            prior_file - string with the path to the prior file
+            
+        Returns:
+            list - list of strings representing the contents of the prior file
+        """
+        if not os.path.exists(prior_file):
+            raise FileNotFoundError(f"Prior file {prior_file} not found.")
+        
+        with open(prior_file, 'r') as f:
+            self.prior_lines = f.readlines()
+        
+        return self.prior_lines
+
+    def extract_knowledge(self, prior_lines) -> dict:
+        """
+        returns the knowledge from the prior file
+        Args:
+            prior_lines - list of strings representing the lines in the prior file
+        Returns:
+            dict - a dictionary where keys are
+                addtemporal, forbiddirect, requiredirect
+                 
+                For addtemporal is a dictionary where the keys are the tier numbers (0 based) and 
+                values are lists of the nodes in that tier.
+
+                For forbiddirect and requiredirect, they will be empty in this case as this method is only for addtemporal.
+        """
+        tiers = {}
+        inAddTemporal = False
+        stop = False
+        for line in prior_lines:
+            # find the addtemporal line
+            if line.startswith('addtemporal'):
+                inAddTemporal = True
+                continue
+            # find the end of the addtemporal block
+            if inAddTemporal and (line.startswith('\n') or line.startswith('forbiddirect')):
+                inAddTemporal = False
+                continue
+            if inAddTemporal:
+                # expect 1 binge_lag vomit_lag panasneg_lag panaspos_lag pomsah_lag
+
+                # split the line
+                line = line.strip()
+                items = line.split()
+
+                # add to dictionary
+                if len(items) != 0:
+                    tiers[int(items[0])-1] = items[1:]
+
+        knowledge = {
+            'addtemporal': tiers
+        }
+
+        return knowledge   
+
+    def add_to_tier(self,tier,node):
+        """
+        Add to tier for prior knowledge, add temporal
+
+        Args:
+            tier (_type_): _description_
+            node (_type_): _description_
+        """
+        
+        self.knowledge.addToTier(self.lang.Integer(tier), self.lang.String(node))
+
+    def clearKnowledge(self):
+        """
+        Clears the knowledge in the search object
+        """
+        self.knowledge = self.td.Knowledge()
+        
+    def load_knowledge(self, knowledge:dict):
+        """
+        Load the knowledge
+        
+        The standard prior.txt file looks like this:
+        
+        /knowledge
+
+        addtemporal
+        1 Q2_exer_intensity_ Q3_exer_min_ Q2_sleep_hours_ PANAS_PA_ PANAS_NA_ stressed_ Span3meanSec_ Span3meanAccuracy_ Span4meanSec_ Span4meanAccuracy_ Span5meanSec_ Span5meanAccuracy_ TrailsATotalSec_ TrailsAErrors_ TrailsBTotalSec_ TrailsBErrors_ COV_neuro_ COV_pain_ COV_cardio_ COV_psych_
+        2 Q2_exer_intensity Q3_exer_min Q2_sleep_hours PANAS_PA PANAS_NA stressed Span3meanSec Span3meanAccuracy Span4meanSec Span4meanAccuracy Span5meanSec Span5meanAccuracy TrailsATotalSec TrailsAErrors TrailsBTotalSec TrailsBErrors COV_neuro COV_pain COV_cardio COV_psych
+
+        forbiddirect
+
+        requiredirect
+        
+        The input dict will have the keys of addtemporal, forbiddirect, requiredirect
+        
+        For the addtemporal key, the value will be another dict with the keys of 1, 2, 3, etc.
+        representing the tiers. The values will be a list of the nodes in that tier.
+        
+        Args:
+        search - search object
+        knowledge - dictionary with the knowledge
+        
+        """
+        
+        # check if addtemporal is in the knowledge dict
+        if 'addtemporal' in knowledge:
+            tiers = knowledge['addtemporal']
+            for tier, nodes in tiers.items():
+                # tier is a number, tetrad uses 0 based indexing so subtract 1
+                for node in nodes:
+                    self.add_to_tier(tier, node)
+                    pass
+
+        # if there are other knowledge types, load them here
+        pass
+
+    def extract_edges(self, text) -> list:
+        """
+        Extract out the edges between Graph Edges and Graph Attributes
+        from the output of the search.
+        
+        Args:
+        text - text output from search
+        
+        Return:
+        list of edges
+        
+        """
+        edges = set()
+        nodes = set()
+        pairs = set()  # alphabetical order of nodes of an edge
+        # get the lines
+        lines = text.split('\n')
+        startFlag=False  # True when we are in the edges, False when not
+        for line in lines:
+            # check if line begins with a number and period
+            # convert line to python string
+            line = str(line)
+            if re.match(r"^\d+\.", line):
+            # if startFlag == False:
+            #     if "Graph Edges:" in line:
+            #         startFlag = True
+            #         continue  # continue to next line
+            # if startFlag == True:
+                # # check if there is edge information a '--'
+                # if '-' in line:
+                    # this is an edge so add to the set
+                    # strip out the number in front  1. drinks --> happy
+                    # convert to a string
+                    linestr = str(line)
+                    clean_edge = linestr.split('. ')[1]
+                    edges.add(clean_edge)
+                    
+                    # add nodes
+                    nodeA = clean_edge.split(' ')[0]
+                    nodes.add(nodeA)
+                    nodeB = clean_edge.split(' ')[2]
+                    nodes.add(nodeB)
+                    combined_string = ''.join(sorted([nodeA, nodeB]))
+                    pairs.add(combined_string)
+                    pass
+        
+        return list(edges) 
+
+    def summarize_estimates(self, df):
+        """
+        Summarize the estimates
+        """
+        # get the Estimate column from the df 
+        estimates = df['Estimate']       
+        # get the absolute value of the estimates
+        abs_estimates = estimates.abs()
+        # get the mean of the absolute values
+        mean_abs_estimates = abs_estimates.mean()
+        # get the standard deviation of the absolute values
+        std_abs_estimates = abs_estimates.std()
+        return {'mean_abs_estimates': mean_abs_estimates, 'std_abs_estimates': std_abs_estimates}
+        
+    def edges_to_lavaan(self, edges, exclude_edges = ['---','<->','o-o']):
+        """
+        Convert edges to a lavaan string
+        """
+        lavaan_model = ""
+        for edge in edges:
+            nodeA = edge.split(' ')[0]
+            nodeB = edge.split(' ')[2]
+            edge_type = edge.split(' ')[1]
+            if edge_type in exclude_edges:
+                continue
+            # remember that for lavaan, target ~ source
+            lavaan_model += f"{nodeB} ~ {nodeA}\n"
+        return lavaan_model
+    
+    def run_semopy(self, lavaan_model, data):  
+        
+        """
+        run sem using semopy package
+        
+        lavaan_model - string with lavaan model
+        data - pandas df with data
+        """
+        
+        # create a sem model   
+        model = semopy.Model(lavaan_model)
+
+        ## TODO - check if there is a usable model,
+        ## for proj_dyscross2/config_v2.yaml - no direct edges!
+        ## TODO - also delete output files before writing to them so that
+        ## we don't have hold overs from prior runs.
+        opt_res = model.fit(data)
+        estimates = model.inspect()
+        stats = semopy.calc_stats(model)
+        
+        # change column names lval to dest and rval to src
+        estimatesRenamed = estimates.rename(columns={'lval': 'dest', 'rval': 'src'})
+        # convert the estimates to a dict using records
+        estimatesDict = estimatesRenamed.to_dict(orient='records')        
+
+        return ({'opt_res': opt_res,
+                 'estimates': estimates, 
+                 'estimatesDict': estimatesDict,
+                 'stats': stats,
+                 'model': model})
+
+    def add_sem_results_to_graph(self, obj, df, format: bool = True):
+        """
+        Add the semopy results to the graph object.
+        Args:
+            obj (DgraphFlex): The graph object to add the results to.
+            df (pd.DataFrame): The semopy results dataframe.
+            format (bool): Whether to format the estimates or not. Defaults to True.
+        
+        """
+        # iterate over the estimates id the df semopy output
+        # and add them to the graph object
+
+        # iterate over the estimates and add them to the graph
+        # object
+        
+        for index, row in df.iterrows():
+            if row['op'] == '~':
+                source = row['rval']
+                target = row['lval']
+                estimate = row['Estimate']
+                pvalue = row['p-value']
+                # modify the edge in the existing graph obj
+                # set the color based on the sign of estimate, green for positive, red for negative
+                color = 'green' if estimate > 0 else 'red'
+                
+                obj.modify_existing_edge(source, target, color=color, strength=estimate, pvalue=pvalue)
+                pass
+        
+    def run_gfci(self, df: pd.DataFrame,
+                 alpha: float = 0.01,
+                 penalty_discount: float = 1) -> str:
+        
+        data = self.df_to_data(df)
+
+        test = self.ts.test.IndTestFisherZ(data, alpha)
+        score = self.ts.score.SemBicScore(data, True)
+        score.setPenaltyDiscount(penalty_discount)
+        score.setStructurePrior(0)
+
+        # FOR THE MOST PART, DONT CHANGE ANY OF THESE
+        # UNLESS COMPUTATION IS TAKING TOO LONG
+        gfci = self.ts.GFci(test, score)
+        gfci.setCompleteRuleSetUsed(True)
+        gfci.setDepth(-1)
+        gfci.setDoDiscriminatingPathRule(True)
+        gfci.setFaithfulnessAssumed(True)
+        gfci.setMaxDegree(-1)
+        gfci.setMaxPathLength(-1)
+        gfci.setPossibleMsepSearchDone(True)
+        gfci.setVerbose(False)
+        
+        # set knowledge
+        gfci.setKnowledge(self.knowledge)
+        
+        # run the search
+        graph = gfci.search().toString()    
+        
+        return graph
+
+    def test1(self):
+        """
+        Test running a simple gfci model
+        """
+        df = self.read_csv('data/boston_data_raw.csv')
+        output=self.run_gfci(df)
+        edges = self.extract_edges(output)
+        pass
+            
+    def test(self):
+        """
+        Test running a simple gfci model
+        with lag
+        """
+        df = self.read_csv('data/boston_data_raw.csv')
+        # add lag
+        df = self.add_lag_columns(df, lag_stub='_lag')
+        # standardize the columns
+        df = self.standardize_df_cols(df)
+        
+        # load prior
+        prior_lines = self.read_prior_file(f'data/boston_prior.txt')
+        # extract knowledge
+        knowledge = self.extract_knowledge(prior_lines)
+
+        self.load_knowledge(knowledge)
+        
+        output=self.run_gfci(df)
+        edges = self.extract_edges(output)
+
+        # get lavaan_model
+        lavaan_model = self.edges_to_lavaan(edges)
+        # run the semopy
+        sem_results = self.run_semopy(lavaan_model, df)
+        
+        # create the graph
+        obj = DgraphFlex()
+        obj.add_edges(edges)
+        # output graph
+        obj.save_graph("png","test_plot")
+                
+        # add sem info to graph
+        self.add_sem_results_to_graph(obj,sem_results['estimates'])
+        # output graph
+        obj.save_graph("png","test_plot_sem")    
+        
+        # create the graph excluding non directed edges
+        obj = DgraphFlex()
+        obj.add_edges(edges, exclude = ['---','o-o','<->'])
+        # output graph
+        obj.save_graph("png","test_plot2")
+                
+        # add sem info to graph
+        self.add_sem_results_to_graph(obj,sem_results['estimates'])
+        # output graph
+        obj.save_graph("png","test_plot2_sem")  
+            
+        pass
+        
+if __name__ == "__main__":
+    
+    tp = TetradPlus()
+    tp.test()
+    pass
