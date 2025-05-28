@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tetrad_plus"
+version = "0.1.0"
+authors = [
+  { name = "Kelvin O. Lim", email = "lim.kelvino@gmail.com" },
+]
+description = "A package of tools for working with the tetrad java program for causal discovery from CMU"
+readme = "README.md"
+requires-python = ">=3.13"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    # can't have direct dependency
+    "jPype1",
+    "pandas",
+    "python-dotenv",
+    "PyYAML",
+    "seaborn",
+    "semopy",
+    "graphviz",
+    "tdqm",
+    "ipykernel",
+    "dgraph_flex",
+    "ipywidgets",
+]
+
+[tool.setuptools]
+#include_package_data = true 
+
+
+
+[project.urls]
+"Homepage" = "https://github.com/kelvinlim/tetrad_plus"
+"Bug Tracker" = "https://github.com/kelvinlim/tetrad_plus/issues"
