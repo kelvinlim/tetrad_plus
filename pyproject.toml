@@ -4,46 +4,41 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tetrad_plus"
-version = "0.1.0"
+version = "0.1.0.5"
 authors = [
   { name = "Kelvin O. Lim", email = "lim.kelvino@gmail.com" },
 ]
 description = "A package of tools for working with the tetrad java program for causal discovery from CMU"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["tetrad_plus*"]
-
-[tool.setuptools.package-data]
-"tetrad_plus" = ["jars/*.jar"] # Specify the path relative to the package root
-
+# This is the correct way to list runtime dependencies directly under [project]
 dependencies = [
-    # can't have direct dependency
-    "jPype1",
+    "JPype1",
     "pandas",
     "python-dotenv",
     "PyYAML",
     "seaborn",
     "semopy",
     "graphviz",
-    "tdqm",
+    "tqdm",
     "ipykernel",
     "dgraph_flex",
     "ipywidgets",
+    "scikit-learn"
 ]
-
-[tool.setuptools]
-#include_package_data = true 
-
-
 
 [project.urls]
 "Homepage" = "https://github.com/kelvinlim/tetrad_plus"
 "Bug Tracker" = "https://github.com/kelvinlim/tetrad_plus/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tetrad_plus*"]
+
+[tool.setuptools.package-data]
+"tetrad_plus" = ["jars/*.jar"]
