@@ -14,6 +14,7 @@ import edu.cmu.tetrad.data as td
 import edu.cmu.tetrad.graph as tg
 import edu.cmu.tetrad.search as ts
 
+#td = jpype.JPackage("edu.cmu.tetrad.data")
 
 def df_to_data(df):
     cols = df.columns
