@@ -1,5 +1,7 @@
 #! /usr/bin/env python
 
+from importlib.resources import files as pkg_resources_files # For Python 3.9+
+
 import json
 import os
 import re
@@ -19,11 +21,12 @@ from dgraph_flex import DgraphFlex
 
 from sklearn.preprocessing import StandardScaler
 
-__version_info__ = ('0', '1', '0')
+__version_info__ = ('0', '1', '1')
 __version__ = '.'.join(__version_info__)
 
 version_history = \
 """
+1.0.1 - change startJVM to use jars in the package
 0.1.0 - initial version  
 """
 class TetradPlus():
@@ -34,7 +37,6 @@ class TetradPlus():
         pass
     
     def startJVM(self, 
-                 classpath="jars/tetrad-gui-7.6.3-launch.jar",
                  jvm_args="-Xmx8g"
                  ):
         
@@ -44,7 +46,13 @@ class TetradPlus():
         Args:
         
         """
-        res = jpype.startJVM(jvm_args, classpath=classpath)     
+        # Determine the path to the JAR file dynamically
+        jar_filename = "tetrad-gui-7.6.3-launch.jar"
+        jar_resource = pkg_resources_files('tetrad_plus.jars').joinpath(jar_filename)
+        classpath = str(jar_resource) # This gives a Path object, convert to string for jpype
+
+        print(f"Attempting to start JVM with classpath: {classpath}")
+        res = jpype.startJVM(jvm_args, classpath=classpath)
         
         # make the classes available within the class
         self.util = jpype.JPackage("java.util")
