@@ -21,12 +21,13 @@ from dgraph_flex import DgraphFlex
 
 from sklearn.preprocessing import StandardScaler
 
-__version_info__ = ('0', '1', '1')
+__version_info__ = ('0', '1', '2')
 __version__ = '.'.join(__version_info__)
 
 version_history = \
 """
-0.0.1 - change startJVM to use jars in the package
+0.1.2 - reworked run_model_search to use custom run_gfci from Bryan Andrews
+0.1.1 - change startJVM to use jars in the package
 0.1.0 - initial version  
 """
 class TetradPlus():
@@ -736,7 +737,138 @@ class TetradPlus():
                   } 
         
         return result
+
+    def run_stability_search(self, full_df: pd.DataFrame,
+                            model: str = 'gfci',
+                            knowledge: Optional[dict] = None,
+                            score = {'sem_bic': {'penalty_discount': 1.0}},
+                            test ={'fisher_z': {'alpha': .05}},
+                            runs: int = 100,
+                            min_fraction: float= 0.75,
+                            subsample_fraction: float = 0.9,
+                            random_state: Optional[int] = None,
+                            lag_flag = False,
+                            save_file: Optional[str] = None) -> tuple:
+        """
+        Run a stability search on the DataFrame using the specified model.
         
+        Edges are tabluated for each run using a set.
+        Edges that are present for a minimum of min_fraction of runs will be retained
+        and returned.
+        The edges are returned as a list of strings.
+        
+        Args:
+            df: pd.DataFrame - the DataFrame to perform the stability search on
+            model: str - the model to use for the search
+            knowledge: Optional[dict] - additional knowledge to inform the search
+            score: dict - scoring parameters
+            test: dict - testing parameters
+            runs: int - number of runs to perform
+            min_fraction: float - minimum fraction of runs an edge must appear in to be retained
+            subsample_fraction: float - fraction of data to subsample for each run
+            random_state: Optional[int] - random state for reproducibility
+            lag_flag: - if True, add lagged columns to the DataFrame
+        Returns:
+            list - list with the results
+        """
+
+        # dictionary where key is the edge and value is the number of times it was found
+        edge_counts = {}
+        
+        # list to hold results of each run
+        run_results = []
+
+        # check if in jupyter to select the progress bar code
+        if self.in_jupyter():
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm      
+              
+        # loop over the number of runs
+        myRuns = range(runs)
+        for i in tqdm(myRuns, desc=f"Running stability search with {runs} runs", unit="run"):
+            # subsample the DataFrame
+            df = self.subsample_df(full_df, fraction=subsample_fraction, random_state=random_state)
+            
+            # check if lag_flag is True
+            if lag_flag:
+                # add lagged columns
+                df = self.add_lag_columns(df, lag_stub='_lag')
+                
+            # standardize the data
+            df = self.standardize_df_cols(df)
+                
+            # run the search
+            searchResult = self.run_model_search(df, model=model, 
+                                                knowledge=knowledge, 
+                                                score=score,
+                                                test=test,
+                                                verbose=True)
+            # get the edges
+            edges = searchResult['edges']
+            # loop over the edges
+            for edge in edges:
+                edge_counts[edge] = edge_counts.get(edge, 0) + 1
+
+            info = {
+                'edges': edges,
+                'edge_counts': edge_counts,
+            }
+            # add the info to the runs list
+            run_results.append(info)
+        print(f"\nSearch complete!")
+        
+        # check similarity of edges, sort alphabetically
+        # get all the keys and then sort them
+
+        sorted_edge_keys = sorted(edge_counts.keys())
+        
+        sorted_edge_counts = {}
+        sorted_edge_counts_raw = {}
+        # loop over the sorted keys and store the fractional count 
+        for edge in sorted_edge_keys:
+            sorted_edge_counts[edge] = edge_counts[edge]/runs
+            sorted_edge_counts_raw[edge] = edge_counts[edge]
+
+        selected_edges = self.select_edges(sorted_edge_counts, min_fraction=min_fraction)
+
+        # combine results into a dictionary
+        results = {
+            'selected_edges': selected_edges,
+            'sorted_edge_counts': sorted_edge_counts,
+            'sorted_edge_counts_raw': sorted_edge_counts_raw,
+            'edge_counts': edge_counts, 
+            #'run_results': run_results, # error is not JSON serializable
+        }
+
+        if save_file is not None:
+            # save the results to a json file
+            with open(save_file, 'w') as f:
+                json.dump(results, f, indent=4)
+            print(f"Results saved to {save_file}")
+
+        return selected_edges, sorted_edge_counts, sorted_edge_counts_raw, run_results
+    def in_jupyter(self)->bool:
+        """
+        Check if the code is running in a Jupyter Notebook environment.
+
+        Returns:
+            bool: True if running in a Jupyter Notebook, False otherwise.
+        
+        """
+        try:
+            # Check if the IPython module is available
+            from IPython import get_ipython
+            ipython = get_ipython()
+            
+            # Check if the current environment is a Jupyter Notebook
+            if ipython is not None and 'IPKernelApp' in ipython.config:
+                return True
+        except ImportError:
+            pass
+        
+        return False
+            
     def run_gfci(self, df: pd.DataFrame,
                  alpha: float = 0.01,
                  penalty_discount: float = 1,
