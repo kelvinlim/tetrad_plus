@@ -20,7 +20,7 @@
             "name": "tetrad_plus",
             "type": "debugpy",
             "request": "launch",
-            "program": "src/tetrad_plus.py",
+            "program": "tetrad_plus/tetrad_plus.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [

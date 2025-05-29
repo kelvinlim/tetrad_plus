@@ -26,7 +26,7 @@ __version__ = '.'.join(__version_info__)
 
 version_history = \
 """
-1.0.1 - change startJVM to use jars in the package
+0.0.1 - change startJVM to use jars in the package
 0.1.0 - initial version  
 """
 class TetradPlus():
@@ -62,12 +62,7 @@ class TetradPlus():
         self.knowledge = self.td.Knowledge()
         
         self.lang = jpype.JPackage("java.lang")
-
-
-        
-
-
-    
+   
     def loadPaths(self):
         """
         Load the paths from ~/.tetradrc
@@ -105,14 +100,30 @@ class TetradPlus():
         
         return False
         
+    def getEMAData(self) -> pd.DataFrame:
+        """
+        Returns a dataframe containing an EMA dataset
         
-    def df_to_data(self, df: pd.DataFrame):
+        Returns:
+        pandas dataframe
+        """
+        
+        csv_filename = "boston_data_raw.csv"
+        csv_resource = pkg_resources_files('tetrad_plus.data').joinpath(csv_filename)
+        csv_path = str(csv_resource) # This gives a Path object, convert to string for jpype
+        df = pd.read_csv(csv_path)
+        return df
+    
+    def df_to_data(self, 
+                   df: pd.DataFrame,
+                   jitter: bool=False):
         """
         
         Load pandas dataframe into TetradSearch
 
         Args:
-            df (pd.DataFrame): 
+            df (pd.DataFrame): dataframe
+            jitter (bool): flag to jitter data
 
         Returns:
             
@@ -122,7 +133,8 @@ class TetradPlus():
         n, p = df.shape
 
         # JITTER THE DATA; FEEL FREE TO REMOVE
-        values += 1e-3 * np.random.randn(n, p)
+        if jitter:
+            values += 1e-3 * np.random.randn(n, p)
 
         variables = self.util.ArrayList()
         for col in cols:
@@ -552,31 +564,21 @@ class TetradPlus():
             # check if line begins with a number and period
             # convert line to python string
             line = str(line)
-            if re.match(r"^\d+\.", line):
-            # if startFlag == False:
-            #     if "Graph Edges:" in line:
-            #         startFlag = True
-            #         continue  # continue to next line
-            # if startFlag == True:
-                # # check if there is edge information a '--'
-                # if '-' in line:
-                    # this is an edge so add to the set
-                    # strip out the number in front  1. drinks --> happy
-                    # convert to a string
-                    linestr = str(line)
-                    clean_edge = linestr.split('. ')[1]
-                    edges.add(clean_edge)
-                    
-                    # add nodes
-                    nodeA = clean_edge.split(' ')[0]
-                    nodes.add(nodeA)
-                    nodeB = clean_edge.split(' ')[2]
-                    nodes.add(nodeB)
-                    combined_string = ''.join(sorted([nodeA, nodeB]))
-                    pairs.add(combined_string)
-                    pass
+            if re.match(r"^\d+\.", line): # matches lines like "1. drinks --> happy"
+                linestr = str(line)
+                clean_edge = linestr.split('. ')[1]
+                edges.add(clean_edge)
+                
+                # add nodes
+                nodeA = clean_edge.split(' ')[0]
+                nodes.add(nodeA)
+                nodeB = clean_edge.split(' ')[2]
+                nodes.add(nodeB)
+                combined_string = ''.join(sorted([nodeA, nodeB]))
+                pairs.add(combined_string)
+                pass
         
-        return list(edges) 
+        return list(edges)
 
     def summarize_estimates(self, df):
         """
@@ -665,12 +667,82 @@ class TetradPlus():
                 
                 obj.modify_existing_edge(source, target, color=color, strength=estimate, pvalue=pvalue)
                 pass
+
+    def run_model_search(self, df, **kwargs):
+        """
+        Run a search
+        
+        Args:
+        df - pandas dataframe
+        
+        kwargs:
+        model - string with the model to use, default gfci
+        knowledge - dictionary with the knowledge
+        score - dictionary with the arguments for the score
+            e.g. {"sem_bic": {"penalty_discount": 1}}
+            
+        test - dictionary with the arguments for the test alpha 
+        
+        Returns:
+        result - dictionary with the results
+        """
+    
+        model = kwargs.get('model', 'gfci')
+        knowledge = kwargs.get('knowledge', None)
+        score = kwargs.get('score', None)
+        test = kwargs.get('test', None)
+        jitter = kwargs.get('jitter',False)
+        depth = kwargs.get('depth', -1)
+        verbose = kwargs.get('verbose', False)
+        max_degree = kwargs.get('max_degree', -1)
+        max_disc_path_length = kwargs.get('max_disc_path_length', -1)
+        complete_rule_set_used = kwargs.get('complete_rule_set_used', False)
+        guarantee_pag = kwargs.get('guarantee_pag', False)
+        
+        # check if score is not None
+        if score is not None:  
+            ## Use a SEM BIC score
+            if 'sem_bic' in score:
+                penalty_discount = score['sem_bic']['penalty_discount']
+                
+        if test is not None:
+            if 'fisher_z' in test:
+                alpha = test['fisher_z'].get('alpha',.01)
+            
+        # check if depth is not None - set in run_gfci
+        # if depth != -1:
+        #     self.set_depth(depth)
+            
+        if knowledge is not None:
+            self.load_knowledge(knowledge)
+        
+        # set the verbosity
+        # if verbose == False:
+        #     self.params.set(Params.VERBOSE, False)
+
+        ## Run the selected search
+        if model == 'gfci':   
+                
+            graph = self.run_gfci(  df,
+                                alpha=alpha,
+                                penalty_discount=penalty_discount,
+                                jitter=jitter
+                            )
+
+        edges = self.extract_edges(graph)
+        
+        result = {  'edges': edges,
+                    'raw_output': graph
+                  } 
+        
+        return result
         
     def run_gfci(self, df: pd.DataFrame,
                  alpha: float = 0.01,
-                 penalty_discount: float = 1) -> str:
+                 penalty_discount: float = 1,
+                 jitter: bool = False) -> str:
         
-        data = self.df_to_data(df)
+        data = self.df_to_data(df, jitter)
 
         test = self.ts.test.IndTestFisherZ(data, alpha)
         score = self.ts.score.SemBicScore(data, True)
