@@ -747,7 +747,7 @@ class TetradPlus():
                             min_fraction: float= 0.75,
                             subsample_fraction: float = 0.9,
                             random_state: Optional[int] = None,
-                            lag_flag = False,
+                            lag_stub: str = '',
                             save_file: Optional[str] = None) -> tuple:
         """
         Run a stability search on the DataFrame using the specified model.
@@ -767,7 +767,7 @@ class TetradPlus():
             min_fraction: float - minimum fraction of runs an edge must appear in to be retained
             subsample_fraction: float - fraction of data to subsample for each run
             random_state: Optional[int] - random state for reproducibility
-            lag_flag: - if True, add lagged columns to the DataFrame
+            lag_stub: - if given a string, will add lagged columns to the DataFrame with the stub
         Returns:
             list - list with the results
         """
@@ -791,9 +791,9 @@ class TetradPlus():
             df = self.subsample_df(full_df, fraction=subsample_fraction, random_state=random_state)
             
             # check if lag_flag is True
-            if lag_flag:
+            if lag_stub:
                 # add lagged columns
-                df = self.add_lag_columns(df, lag_stub='_lag')
+                df = self.add_lag_columns(df, lag_stub=lag_stub)
                 
             # standardize the data
             df = self.standardize_df_cols(df)
