@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tetrad_plus"
-version = "0.1.2"
+version = "0.1.2.1"
 authors = [
   { name = "Kelvin O. Lim", email = "lim.kelvino@gmail.com" },
 ]
@@ -41,4 +41,4 @@ where = ["."]
 include = ["tetrad_plus*"]
 
 [tool.setuptools.package-data]
-"tetrad_plus" = ["jars/*.jar"]
+"tetrad_plus" = ["jars/*.jar","data/*.csv","data/*.txt"]
