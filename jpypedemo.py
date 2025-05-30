@@ -47,7 +47,7 @@ boss_threads = 8
 
 
 # IN THIS EXAMPLE DATA CONTAINS MANY DATASETS
-path = "data/"
+path = "tetrad_plus/data/"
 for fname in ['boston_data_raw.csv']:
     print(fname)
     df = pd.read_csv(path + fname)
@@ -83,6 +83,6 @@ for fname in ['boston_data_raw.csv']:
     # SAVE THE OUTPUT GRAPHS
     graph = search.search().toString()
     # remove csv from fname
-    output_file = fname.replace('.csv','_graph.txt')
+    output_file = 'boss_' + fname.replace('.csv','_graph.txt')
     with open(output_file, "w") as f: f.write(str(graph))
     pass
