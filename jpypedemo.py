@@ -6,7 +6,7 @@ import jpype
 import jpype.imports
 
 # REPLACE WITH YOUR PATH TO JAR
-classpath="jars/tetrad-gui-7.6.3-launch.jar"
+classpath="tetrad_plus/jars/tetrad-gui-7.6.3-launch.jar"
 res = jpype.startJVM("-Xmx8g", classpath=classpath)
 
 import java.util as util
@@ -82,5 +82,7 @@ for fname in ['boston_data_raw.csv']:
 
     # SAVE THE OUTPUT GRAPHS
     graph = search.search().toString()
-    with open(f"graphs/{fname}", "w") as f: f.write(str(graph))
+    # remove csv from fname
+    output_file = fname.replace('.csv','_graph.txt')
+    with open(output_file, "w") as f: f.write(str(graph))
     pass
