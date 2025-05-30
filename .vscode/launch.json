@@ -6,10 +6,10 @@
     "configurations": [
 
         {
-            "name": "jpypedemo",
+            "name": "boss_jpype_demo",
             "type": "debugpy",
             "request": "launch",
-            "program": "jpypedemo.py",
+            "program": "boss_demo.py",
             "console": "integratedTerminal",
             "args": [
                 "--cmd",
