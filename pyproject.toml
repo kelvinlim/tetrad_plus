@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tetrad_plus"
-version = "0.1.2.1"
+version = "0.1.2.2"
 authors = [
   { name = "Kelvin O. Lim", email = "lim.kelvino@gmail.com" },
 ]
 description = "A package of tools for working with the tetrad java program for causal discovery from CMU"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -29,7 +29,11 @@ dependencies = [
     "ipykernel",
     "dgraph_flex",
     "ipywidgets",
-    "scikit-learn"
+    "scikit-learn",
+    "ipython",
+    "ipykernel",
+    "matplotlib",
+
 ]
 
 [project.urls]
