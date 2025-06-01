@@ -22,11 +22,12 @@ from dgraph_flex import DgraphFlex
 
 from sklearn.preprocessing import StandardScaler
 
-__version_info__ = ('0', '1', '2')
+__version_info__ = ('0', '1', '3')
 __version__ = '.'.join(__version_info__)
 
 version_history = \
 """
+0.1.3 - add checks of java_version and graphviz dot
 0.1.2 - reworked run_model_search to use custom run_gfci from Bryan Andrews
 0.1.1 - change startJVM to use jars in the package
 0.1.0 - initial version  
@@ -36,9 +37,16 @@ class TetradPlus():
     def __init__(self):
         res = self.loadPaths()
         
+        self.min_java_version = 21
+        
+        # check if we have graphviz dot on path
+        graphviz_check, graphviz_version = self.check_graphviz_dot()
+        if not graphviz_check:
+            raise ValueError("Graphviz 'dot' command is not found. Please install Graphviz and ensure it's in your PATH.")
+
         # check if we have correct Java version
-        if not self.check_java_version():
-            raise ValueError("Java version must be 21 or higher. Please update your Java installation.")
+        if not self.check_java_version(min_java_version=self.min_java_version):
+            raise ValueError(f"Java version must be {self.min_java_version} or higher. Please update your Java installation.")
         self.startJVM()
         pass
     
@@ -109,7 +117,7 @@ class TetradPlus():
         except Exception as e:
             return f"An unexpected error occurred: {e}"
     
-    def check_java_version(self):
+    def check_java_version(self, min_java_version=21):
         """
         Check if the Java version is 21 or higher.
         
@@ -122,8 +130,50 @@ class TetradPlus():
         if match:
             major_version = int(match.group(1))
             minor_version = int(match.group(2))
-            return (major_version > 21) or (major_version == 21 and minor_version >= 0)
+            return (major_version >= min_java_version) and minor_version >= 0
         return False 
+
+    def check_graphviz_dot(self):
+        """
+        Checks if the Graphviz 'dot' command is installed and returns its version.
+
+        sample output
+        "dot - graphviz version 12.2.1 (20241206.2353)"
+        
+        Returns:
+            tuple: (bool, str or None)
+                - True if 'dot' is found, False otherwise.
+                - The version string if found, None otherwise.
+        """
+        try:
+            # Run 'dot -V' command to get the version
+            # capture_output=True to get stdout and stderr
+            # text=True to decode output as text
+            result = subprocess.run(['dot', '-V'], capture_output=True, text=True, check=True)
+            # The version is usually in stderr for 'dot -V'
+            version_output = result.stderr.strip()
+            
+            # Parse the version string. It typically looks like:
+            # "dot - graphviz version 2.47.1 (20210417.1919)"
+            if "graphviz version" in version_output:
+                version_start = version_output.find("graphviz version") + len("graphviz version")
+                version_end = version_output.find(")", version_start)
+                version = version_output[version_start:version_end].strip()
+                return True, version
+            else:
+                return True, version_output # Fallback if format changes
+        except FileNotFoundError:
+            return False, None
+        except subprocess.CalledProcessError as e:
+            # 'dot' command was found but exited with an error
+            # This might happen if there's an issue with the Graphviz installation
+            print(f"Error running 'dot -V': {e}")
+            print(f"Stdout: {e.stdout}")
+            print(f"Stderr: {e.stderr}")
+            return False, None
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            return False, None
           
     def loadPaths(self):
         """
