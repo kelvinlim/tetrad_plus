@@ -7,6 +7,7 @@ import os
 import re
 from pathlib import Path
 import socket
+import subprocess
 from typing import Optional, List
 
 import jpype
@@ -34,6 +35,10 @@ class TetradPlus():
     
     def __init__(self):
         res = self.loadPaths()
+        
+        # check if we have correct Java version
+        if not self.check_java_version():
+            raise ValueError("Java version must be 21 or higher. Please update your Java installation.")
         self.startJVM()
         pass
     
@@ -63,7 +68,63 @@ class TetradPlus():
         self.knowledge = self.td.Knowledge()
         
         self.lang = jpype.JPackage("java.lang")
-   
+
+    def getTetradVersion(self):
+        """
+        Get the version of Tetrad
+        """
+        
+        from edu.cmu.tetrad.util import Version
+        
+        version = Version.currentViewableVersion().toString()
+        return version
+
+    def get_java_version(self):
+        """
+        
+        Get the Java version installed on the system.
+
+        typical string is
+        
+        'java version "21.0.6" 2025-01-21 LTS\nJava(TM) SE Runtime Environment (build 21.0.6+8-LTS-188)\nJava HotSpot(TM) 64-Bit Server VM (build 21.0.6+8-LTS-188, mixed mode, sharing)\n'
+        
+        Returns:
+            _type_: _description_
+        """
+        try:
+            # Execute the command. stderr=subprocess.PIPE is important because
+            # java -version often prints to stderr.
+            process = subprocess.run(['java', '-version'], 
+                                    capture_output=True, 
+                                    text=True, 
+                                    check=True)
+            
+            # The output of 'java -version' is typically on stderr
+            version_output = process.stderr
+            return version_output
+        except FileNotFoundError:
+            return "Java is not found. Make sure it's installed and in your PATH."
+        except subprocess.CalledProcessError as e:
+            return f"Error executing command: {e}\nOutput: {e.stderr}"
+        except Exception as e:
+            return f"An unexpected error occurred: {e}"
+    
+    def check_java_version(self):
+        """
+        Check if the Java version is 21 or higher.
+        
+        Returns:
+            bool: True if Java version is 21 or higher, False otherwise.
+        """
+        java_version = self.get_java_version()
+        # Extract the version number from the string
+        match = re.search(r'(\d+)\.(\d+)', java_version)
+        if match:
+            major_version = int(match.group(1))
+            minor_version = int(match.group(2))
+            return (major_version > 21) or (major_version == 21 and minor_version >= 0)
+        return False 
+          
     def loadPaths(self):
         """
         Load the paths from ~/.tetradrc
