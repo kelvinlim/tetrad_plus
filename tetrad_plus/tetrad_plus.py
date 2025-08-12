@@ -22,11 +22,14 @@ from dgraph_flex import DgraphFlex
 
 from sklearn.preprocessing import StandardScaler
 
-__version_info__ = ('0', '1', '3')
+__version_info__ = ('0', '1', '4')
 __version__ = '.'.join(__version_info__)
 
 version_history = \
 """
+0.1.4 - add verbose message option in object init
+        run_model_search now automatically does the sem and creates the
+        graph object with the results
 0.1.3 - add checks of java_version and graphviz dot
 0.1.2 - reworked run_model_search to use custom run_gfci from Bryan Andrews
 0.1.1 - change startJVM to use jars in the package
@@ -34,10 +37,17 @@ version_history = \
 """
 class TetradPlus():
     
-    def __init__(self):
+    def __init__(self, 
+                 verbose: int = 1,
+                 min_java_version: int = 21):
+        
+        # default verbose level is 1, 2 is more chatty
+        # output about what is happening
+        self.verbose = verbose
+        
         res = self.loadPaths()
         
-        self.min_java_version = 21
+        self.min_java_version = min_java_version
         
         # check if we have graphviz dot on path
         graphviz_check, graphviz_version = self.check_graphviz_dot()
@@ -65,7 +75,7 @@ class TetradPlus():
         jar_resource = pkg_resources_files('tetrad_plus.jars').joinpath(jar_filename)
         classpath = str(jar_resource) # This gives a Path object, convert to string for jpype
 
-        print(f"Attempting to start JVM with classpath: {classpath}")
+        if self.verbose > 1: print(f"Attempting to start JVM with classpath: {classpath}")
         res = jpype.startJVM(jvm_args, classpath=classpath)
         
         # make the classes available within the class
@@ -780,7 +790,7 @@ class TetradPlus():
                 obj.modify_existing_edge(source, target, color=color, strength=estimate, pvalue=pvalue)
                 pass
 
-    def run_model_search(self, df, **kwargs):
+    def run_model_search(self, df, **kwargs) -> tuple:
         """
         Run a search
         
@@ -795,14 +805,19 @@ class TetradPlus():
             
         test - dictionary with the arguments for the test alpha 
         
+        run_sem - boolean, if True, will run semopy on the results
+        jitter - boolean, if True, will jitter the data
+        
         Returns:
         result - dictionary with the results
+        dg - DgraphFlex object with the edges and sem results
         """
     
         model = kwargs.get('model', 'gfci')
         knowledge = kwargs.get('knowledge', None)
         score = kwargs.get('score', None)
         test = kwargs.get('test', None)
+        run_sem = kwargs.get('run_sem', True)
         jitter = kwargs.get('jitter',False)
         depth = kwargs.get('depth', -1)
         verbose = kwargs.get('verbose', False)
@@ -843,11 +858,28 @@ class TetradPlus():
 
         edges = self.extract_edges(graph)
         
+        # create the graph object
+        dg = DgraphFlex()
+        # add the edges to the graph object
+        dg.add_edges(edges)
+        # if run_sem is True, then run semopy on the edges
+        if run_sem:
+            # convert edges to lavaan model
+            lavaan_model = self.edges_to_lavaan(edges)
+            # run semopy on the lavaan model
+            sem_results = self.run_semopy(lavaan_model, df)
+            # add the sem results to the graph object
+            self.add_sem_results_to_graph(dg, sem_results['estimates'])
+
+        else:
+            sem_results = None
+            
         result = {  'edges': edges,
-                    'raw_output': graph
+                    'cda_output': graph,
+                    'sem_results': sem_results,
                   } 
         
-        return result
+        return result, dg
 
     def run_stability_search(self, full_df: pd.DataFrame,
                             model: str = 'gfci',
